@@ -15,26 +15,29 @@ class ViewController: UIViewController, UITableViewDelegate,UITableViewDataSourc
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         let cell = tableView.dequeueReusableCell(withIdentifier: "todoCell", for: indexPath)
         let todoTitle = todoList[indexPath.row]
-        cell.textLabel?.text = todoTitle
+        cell.textLabel?.text = todoTitle.title
         return cell
     }
     // セルの削除機能
     func tableView(_ tableView: UITableView, commit editingStyle: UITableViewCell.EditingStyle, forRowAt indexPath: IndexPath) {
         if editingStyle == UITableViewCell.EditingStyle.delete {
-            todoList.remove(at: indexPath.row)
-            tableView.deleteRows(at: [indexPath as IndexPath], with: UITableView.RowAnimation.automatic)
+            
+            HttpModel().DeleteData(url: "http://" + ip + ":" + port + "/api/todo/", id: todoList[indexPath.row].id){(message) in
+                self.alert(title: "送信結果", message: message)
+                
+                self.todoList.remove(at: indexPath.row)
+                self.tableView.deleteRows(at: [indexPath as IndexPath], with: UITableView.RowAnimation.automatic)
+            }
+            
         }
     }
     
     @IBOutlet weak var tableView: UITableView!
     
-    var todoList = [String]()
+    let ip : String = "192.168.0.17"
+    let port : String = "8000"
     
-    struct ToDo :Codable{
-        let id: Int
-        let title : String
-        let is_complete : String
-    }
+    var todoList = [TodoData]()
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -44,62 +47,25 @@ class ViewController: UIViewController, UITableViewDelegate,UITableViewDataSourc
         tableView.refreshControl = UIRefreshControl()
         tableView.refreshControl?.addTarget(self, action: #selector(handleRefreshControl), for: .valueChanged)
         
-        let url = URL(string: "http://127.0.0.1:8001/api/todo/")!  //URLを生成
-        let request = URLRequest(url: url)               //Requestを生成
-        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in  //非同期で通信を行う
-            guard let data = data else { return }
-            let decoder : JSONDecoder = JSONDecoder()
-            do {
-                let objects:[ToDo] = try decoder.decode([ToDo].self, from: data)
-                print(objects)
-                // メインスレッドで実行
-                DispatchQueue.main.async {
-                    for i in 0...objects.count - 1{
-                        self.todoList.insert(objects[i].title, at: 0)
-                        self.tableView.insertRows(at: [IndexPath(row: 0, section: 0)], with: UITableView.RowAnimation.right)
-                    }
-                }
-                
-            } catch let error {
-                print(error)
-            }
+        //  クロージャはメインスレッドで実行される
+        HttpModel().GetData(url: "http://" + ip + ":" + port + "/api/todo/",handler: updateTableView)
+    }
+    
+    //  実行はメインスレッドで行う必要がある
+    func updateTableView(todoData:[TodoData])->Void{
+        self.todoList.removeAll()
+        
+        for i in 0...todoData.count - 1{
+            self.todoList.insert(todoData[i], at: 0)
         }
-        task.resume()
+        
+        self.tableView.reloadData()                     //TableViewの中身を更新する場合はここでリロード処理
+        self.tableView.refreshControl?.endRefreshing()  //これを必ず記載すること
     }
     
     @objc func handleRefreshControl() {
-        /*
-         更新したい処理をここに記入（データの受け取りなど）
-         */
-        
-        let url = URL(string: "http://127.0.0.1:8001/api/todo/")!  //URLを生成
-        let request = URLRequest(url: url)               //Requestを生成
-        let task = URLSession.shared.dataTask(with: request) { (data, response, error) in  //非同期で通信を行う
-            guard let data = data else { return }
-            let decoder : JSONDecoder = JSONDecoder()
-            do {
-                let objects:[ToDo] = try decoder.decode([ToDo].self, from: data)
-                print(objects)
-                
-                self.todoList.removeAll()
-                
-                for i in 0...objects.count - 1{
-                    self.todoList.insert(objects[i].title, at: 0)
-                }
-                
-                //上記の処理が終了したら下記が実行されます。
-                DispatchQueue.main.async {
-                    self.tableView.reloadData()  //TableViewの中身を更新する場合はここでリロード処理
-                    self.tableView.refreshControl?.endRefreshing()  //これを必ず記載すること
-                }
-                
-            } catch let error {
-                print(error)
-            }
-        }
-        task.resume()
-        
-        
+        //  クロージャはメインスレッドで実行される
+        HttpModel().GetData(url: "http://" + ip + ":" + port + "/api/todo/",handler: updateTableView)
     }
     
     
@@ -110,8 +76,19 @@ class ViewController: UIViewController, UITableViewDelegate,UITableViewDataSourc
         
         let onAction = UIAlertAction(title: "OK", style: UIAlertAction.Style.default){ (action: UIAlertAction) in
             if let textField = alertController.textFields?.first {
-                self.todoList.insert(textField.text!, at: 0)
-                self.tableView.insertRows(at: [IndexPath(row: 0, section: 0)], with: UITableView.RowAnimation.right)
+
+                
+                let todoData = TodoData(id: 0, title: textField.text!, is_complete: "false")
+                let jsonData : Data = try! JSONEncoder().encode(todoData)
+                
+                HttpModel().PostData(url: "http://" + self.ip + ":" + self.port + "/api/todo/", contentData: jsonData){(message) in
+                    self.alert(title: "送信結果", message: message)
+                    
+                    
+                    
+//                    self.todoList.insert(textField.text!, at: 0)
+//                    self.tableView.insertRows(at: [IndexPath(row: 0, section: 0)], with: UITableView.RowAnimation.right)
+                }
             }
         }
         
@@ -123,4 +100,15 @@ class ViewController: UIViewController, UITableViewDelegate,UITableViewDataSourc
         
         present(alertController, animated: true, completion: nil)
     }
+    
+    func alert(title:String, message:String) {
+        var alertController: UIAlertController!
+            alertController = UIAlertController(title: title,
+                                       message: message,
+                                       preferredStyle: .alert)
+            alertController.addAction(UIAlertAction(title: "OK",
+                                           style: .default,
+                                           handler: nil))
+            present(alertController, animated: true)
+        }
 }
